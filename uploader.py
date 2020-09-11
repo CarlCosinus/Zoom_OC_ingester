@@ -6,16 +6,25 @@ import os
 from requests.auth import HTTPDigestAuth
 import sys
 import configparser
+import xmltodict
+import logging
+import time
+
 
 url = ""
 user = ""
 password = ""
+rabbit_url= ""
+rabbit_user= ""
+rabbit_password= ""
+save_local= False
 
 
 def rcv_rabbit_callback(method, properties, body):
+    logging.info("[%s] : Received Rabbit msg",time.asctime())
     data = json.loads(body.decode("utf-8"))
     if "recording_files" not in data:
-        print("No recording found")
+        logging.error("[%s] : No recording found",time.asctime())
     files = data["recording_files"]
     dl_url = ''
     id = ''
@@ -24,32 +33,33 @@ def rcv_rabbit_callback(method, properties, body):
             dl_url = files[0][key]
         elif key == "recording_id":
             id = files[0][key]
-
-    print(dl_url+'/?access_token='+data["token"])
     try:
 
         wget.download(dl_url+'/?access_token='+data["token"],id+'.mp4')
 
-
     except Exception as e:
-        print("Could not download file {}".format(e))
-        print(e)
+        logging.error("[%s] : Could not download file {}".format(e), time.asctime())
 
-    print("id : " +  id)
+    logging.info("[%s] : downloaded zoom recording - id {}".format(id), time.asctime())
     oc_upload(data["creator"],data["topic"], id)
 
 
 def oc_upload(creator,title, rec_id):
 
+    logging.info("[%s] : Title =====>   " + title + "   creator =========>  "+ creator, time.asctime())
+
     response = requests.get(url + '/admin-ng/series/series.json', auth=HTTPDigestAuth(user, password),
-                            headers={'X-Requestedresponse = -Auth': 'Digest'})
+                            headers={'X-Requested-Auth': 'Digest'})
 
     series_list = json.loads(response.content.decode("utf-8"))
     try:
-        username = creator[:creator.index("@")]
+        response = requests.get(url+'/users/'+creator+'.json',auth=HTTPDigestAuth(user, password),headers={'X-Requested-Auth': 'Digest'})
+        data = response.json()
+        username = data['user']['name']
     except ValueError:
-        print("Invalid username: '@' is missing, upload is aborted")
-        username = "Dennis Pfahl"
+        logging.error("[%s] : Invalid shib_username: '@' is missing, default username is used",time.asctime())
+        creator = "Others"
+        username= "Others"
     series_title = "Zoom Recordings "+username
     series_found = False
     for series in series_list["results"]:
@@ -58,24 +68,33 @@ def oc_upload(creator,title, rec_id):
             id = series["id"]
 
     if not series_found:
-        id = create_series(creator, series_title)
+        id = create_series(creator, series_title,username)
 
     with open(rec_id+'.mp4', 'rb') as fobj:
-        data = {"title": title, "creator": creator, "isPartOf": id, "flavor": 'presentation/source'}
+        data = {"title": title, "creator": username, "isPartOf": id, "flavor": 'presentation/source'}
         body = {'body': fobj}
-        requests.post(url + '/ingest/addMediaPackage', data=data, files=body, auth=HTTPDigestAuth(user, password),
+        response = requests.post(url + '/ingest/addMediaPackage', data=data, files=body, auth=HTTPDigestAuth(user, password),
                                  headers={'X-Requested-Auth': 'Digest'})
+        resp_dict = xmltodict.parse(response.content)
+        mp_id = resp_dict['wf:workflow']['mp:mediapackage']['@id']
+        logging.info("[%s] : Zoom recording ID : " + rec_id + " has been uploaded to OC with MP-ID : " + mp_id, time.asctime())
 
-    os.remove(rec_id+'.mp4')
-
+    if save_local:
+        logging.info("[%s] : Renaming mp4", time.asctime())
+        os.rename(rec_id+'.mp4',rec_id+"_"+mp_id + "m.p4")
+    else:
+        logging.info("[%s] : Removing mp4", time.asctime())
+        os.remove(rec_id+'.mp4')
 
 
 def start_consuming_rabbitmsg():
-    credentials = pika.PlainCredentials("adminuser", "EYeeWiz4uvuowei9")
-    rcv_connection = pika.BlockingConnection(pika.ConnectionParameters('zoomctl.ssystems.de', credentials=credentials))
+    logging.info("[%s] : Start consuming",time.asctime())
+    credentials = pika.PlainCredentials(rabbit_user, rabbit_password)
+    rcv_connection = pika.BlockingConnection(pika.ConnectionParameters(rabbit_url, credentials=credentials))
     rcv_channel = rcv_connection.channel()
     queue = rcv_channel.queue_declare(queue="zoomhook")
     msg_count = queue.method.message_count
+    logging.info("[%s] : Received [%s] messages",time.asctime(),msg_count)
     while msg_count > 0:
         method,prop,body =rcv_channel.basic_get(queue="zoomhook", auto_ack=True)
         rcv_rabbit_callback(method,prop,body)
@@ -84,9 +103,9 @@ def start_consuming_rabbitmsg():
     rcv_channel.close()
     rcv_connection.close()
 
-def create_series(creator,title):
+def create_series(shib_name,title, creator):
 
-    print("creating series")
+    logging.info("creating series")
     metadata = [{"label": "Opencast Series DublinCore",
                  "flavor": "dublincore/series",
                  "fields": [{"id": "title",
@@ -94,36 +113,57 @@ def create_series(creator,title):
                             {"id": "creator",
                              "value": [creator]}]}]
 
+    
     acl = [{"allow": True,
             "action": "write",
-            "role": "ROLE_AAI_USER_"+creator},
+            "role": "ROLE_USER_"+shib_name.upper().replace('@','_').replace('-','_').replace('.','_')},
            {"allow": True,
             "action": "read",
-            "role": "ROLE_AAI_USER_"+creator}]
+            "role": "ROLE_USER_"+shib_name.upper().replace('@','_').replace('-','_').replace('.','_')},
+           {"allow": True,
+            "action": "write",
+            "role": "ROLE_GROUP_AAI_MANAGER"},
+           {"allow": True,
+            "action": "read",
+            "role": "ROLE_GROUP_AAI_MANAGER"},
+           {"allow": True,
+            "action": "write",
+            "role": "ROLE_ADMIN"},
+           {"allow": True,
+            "action": "read",
+            "role": "ROLE_ADMIN"}
+           ]
 
     data = {"metadata": json.dumps(metadata),
             "acl": json.dumps(acl)}
 
     response = requests.post(url+'/api/series',data=data,auth=HTTPDigestAuth(user, password),headers={'X-Requested-Auth': 'Digest'})
 
-    print(response.status_code)
-
     return json.loads(response.content.decode("utf-8"))["identifier"]
 
 
 if __name__ == '__main__':
 
+    logging.basicConfig(filename='oc_uploader_error.log', level=logging.INFO)
     try:
         config = configparser.ConfigParser()
         config.read('settings.ini')
+        logging.info("[%s] : Found Settings",time.asctime())
     except FileNotFoundError:
+        logging.error("[%s] : No Settings found",time.asctime())
         sys.exit("No settings found")
 
     try:
         url = config["Opencast"]["Url"]
         user = config["Opencast"]["User"]
         password = config["Opencast"]["Password"]
+        save_local = config.getboolean("Opencast","Save_records_local")
+        rabbit_url = config["Rabbit"]["Url"]
+        rabbit_user = config["Rabbit"]["User"]
+        rabbit_password = config["Rabbit"]["Password"]
+        logging.info("[%s] : Settings are set",time.asctime())
     except KeyError as err:
+        logging.error("[%s] : Key {0} was not found".format(err),time.asctime())
         sys.exit("Key {0} was not found".format(err))
 
     start_consuming_rabbitmsg()
