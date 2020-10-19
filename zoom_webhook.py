@@ -45,14 +45,14 @@ class MyHandler(BaseHTTPRequestHandler):
     def do_POST(s):
         """Respond to Webhook"""
         content_length = int(s.headers['Content-Length'])
-        logging.info("[%s] : Received webhook" % time.asctime())
+        logging.info("Received webhook")
         if content_length < 5:
             s.send_response(400)
             s.end_headers()
             response = BytesIO()
             response.write(b'No data received')
             s.wfile.write(response.getvalue())
-            logging.error("[%s] : No data received" % time.asctime())
+            logging.error("No data received" )
             return
 
         body = json.loads(s.rfile.read(content_length).decode("utf-8"))
@@ -63,14 +63,14 @@ class MyHandler(BaseHTTPRequestHandler):
             response = BytesIO()
             response.write(b'Missing payload field in webhook body')
             s.wfile.write(response.getvalue())
-            logging.error("[%s] : Missing payload field in webhook body" % time.asctime())
+            logging.error("Missing payload field in webhook body")
             return
 
         payload = body["payload"]
         try:
             s.validate_payload(payload)
         except BadWebhookData as e:
-            logging.error("[%s] : bad data" % time.asctime())
+            logging.error("bad data")
             s.send_response(400)
             s.end_headers()
             response = BytesIO()
@@ -78,7 +78,7 @@ class MyHandler(BaseHTTPRequestHandler):
             s.wfile.write(response.getvalue())
             return
         except NoMp4Files as e:
-            logging.error("[%s] : no mp4 found" % time.asctime())
+            logging.error("no mp4 found")
             s.send_response(400)
             s.end_headers()
             response = BytesIO()
@@ -87,7 +87,7 @@ class MyHandler(BaseHTTPRequestHandler):
             return
 
         if payload["object"]["duration"] < MIN_DURATION:
-            logging.error("[%s] : Recording is too short" % time.asctime())
+            logging.error("Recording is too short" )
             s.send_response(400)
             s.end_headers()
             response = BytesIO()
@@ -99,7 +99,7 @@ class MyHandler(BaseHTTPRequestHandler):
         rabbit_msg , recording_id = s.construct_rabbit_msg(payload,token)
 
         s.send_rabbit_msg(rabbit_msg)
-        logging.info("[%s] : Rabbit msg w/ rec ID %s has been sent" % (time.asctime(),recording_id))
+        logging.info("Rabbit msg w/ rec ID %s has been sent" % recording_id)
         s.send_response(200)
         s.end_headers()
         response = BytesIO()
@@ -108,7 +108,7 @@ class MyHandler(BaseHTTPRequestHandler):
 
     def construct_rabbit_msg(self, payload,token):
         now = time.asctime()
-        logging.info("[%s] : Constructing rabbit msg" % time.asctime())
+        logging.info("Constructing rabbit msg" )
         zoom_client = ZoomClient(API_KEY, API_SECRET)
         user_list_response = zoom_client.user.get(id=payload["object"]["host_id"])
         user_list = json.loads(user_list_response.content.decode("utf-8"))
@@ -138,7 +138,7 @@ class MyHandler(BaseHTTPRequestHandler):
             "received_time": now,
             "creator": user_list["location"]
         }
-        logging.info("[%s] : Constructed Rabbit Msg" % time.asctime())
+        logging.info("Constructed Rabbit Msg")
 
         return rabbit_msg, rec_id
 
@@ -177,8 +177,8 @@ class MyHandler(BaseHTTPRequestHandler):
         try:
             for field in required_payload_fields:
                 if field not in payload.keys():
-                    logging.error("[%s] : Missing required payload field '{}'. Keys found: {}"
-                            .format(field, payload.keys()), (time.asctime()))
+                    logging.error("Missing required payload field '{}'. Keys found: {}"
+                            .format(field, payload.keys()))
                     raise BadWebhookData(
                         "Missing required payload field '{}'. Keys found: {}"
                             .format(field, payload.keys()))
@@ -186,8 +186,8 @@ class MyHandler(BaseHTTPRequestHandler):
             obj = payload["object"]
             for field in required_object_fields:
                 if field not in obj.keys():
-                    logging.error("[%s] : Missing required object field '{}'. Keys found: {}"
-                            .format(field, obj.keys()), time.asctime())
+                    logging.error("Missing required object field '{}'. Keys found: {}"
+                            .format(field, obj.keys()))
                     raise BadWebhookData(
                         "Missing required object field '{}'. Keys found: {}"
                             .format(field, obj.keys()))
@@ -197,22 +197,22 @@ class MyHandler(BaseHTTPRequestHandler):
             # make sure there's some mp4 files in here somewhere
             mp4_files = any(x["file_type"].lower() == "mp4" for x in files)
             if not mp4_files:
-                logging.error("[%s] : No mp4 files in recording data",time.asctime())
+                logging.error("No mp4 files in recording data")
                 raise NoMp4Files("No mp4 files in recording data")
 
             for file in files:
                 if "file_type" not in file:
-                    logging.error("[%s] : Missing required file field 'file_type'",time.asctime())
+                    logging.error("Missing required file field 'file_type'")
                     raise BadWebhookData("Missing required file field 'file_type'")
                 if file["file_type"].lower() != "mp4":
                     continue
                 for field in required_file_fields:
                     if field not in file.keys():
-                        logging.error("[%s] : Missing required file field '{}'".format(field), time.asctime())
+                        logging.error("Missing required file field '{}'".format(field))
                         raise BadWebhookData(
                             "Missing required file field '{}'".format(field))
                 if "status" in file and file["status"].lower() != "completed":
-                    logging.error("[%s] : File with incomplete status {}".format(file["status"], time.asctime()))
+                    logging.error(" File with incomplete status {}".format(file["status"]))
                     raise BadWebhookData(
                         "File with incomplete status {}".format(file["status"])
                     )
@@ -222,19 +222,19 @@ class MyHandler(BaseHTTPRequestHandler):
             # on who the caller is
             raise
         except Exception as e:
-            logging.error("[%s] : Unrecognized payload format. {}".format(e), time.asctime())
+            logging.error("Unrecognized payload format. {}".format(e))
             raise BadWebhookData("Unrecognized payload format. {}".format(e))
 
 
 if __name__ == '__main__':
 
-    logging.basicConfig(filename='webhook_error.log',level=logging.DEBUG)
+    logging.basicConfig(filename='webhook_error.log',level=logging.DEBUG, format='%(asctime)s %(message)s',datefmt='%d/%m/%Y %I:%M:%S %p')
     try:
         config = configparser.ConfigParser()
         config.read('settings.ini')
-        logging.info("[%s] : Found Settings" % time.asctime())
+        logging.info("Found Settings")
     except FileNotFoundError:
-        logging.error(("[%s] : No settings found " %time.asctime()))
+        logging.error("No settings found ")
         sys.exit("No settings found")
 
     try:
@@ -246,21 +246,21 @@ if __name__ == '__main__':
         MIN_DURATION = int(config["Webhook"]["Min_Duration"])
         rabbit_user = config["Rabbit"]["User"]
         rabbit_password = config["Rabbit"]["Password"]
-        logging.info("[%s] : Settings are set" %time.asctime())
+        logging.info("Settings are set" )
     except KeyError as err:
-        logging.error("[%s] : Key {0} was not found".format(err) % time.asctime())
+        logging.error("Key {0} was not found".format(err))
         sys.exit("Key {0} was not found".format(err))
     except ValueError as err:
-        logging.error("[%s] : Invalid value, integer expected : {0}".format(err) % time.asctime())
+        logging.error("Invalid value, integer expected : {0}".format(err))
         sys.exit("Invalid value, integer expected : {0}".format(err))
 
     server_class = HTTPServer
     httpd = server_class((HOST_NAME, PORT_NUMBER), MyHandler)
-    logging.info("[%s] : Server Starts - %s:%s" % (time.asctime(),HOST_NAME, PORT_NUMBER))
+    logging.info("Server Starts - %s:%s" % (HOST_NAME, PORT_NUMBER))
     try:
         httpd.serve_forever()
 
     except KeyboardInterrupt:
         pass
     httpd.server_close()
-    logging.info("[%s] : Server Stops - %s:%s" % (time.asctime(),HOST_NAME, PORT_NUMBER))
+    logging.info("Server Stops - %s:%s" % (HOST_NAME, PORT_NUMBER))
