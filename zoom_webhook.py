@@ -88,7 +88,7 @@ class MyHandler(BaseHTTPRequestHandler):
 
         if payload["object"]["duration"] < MIN_DURATION:
             logging.error("Recording is too short" )
-            s.send_response(400)
+            s.send_response(466)
             s.end_headers()
             response = BytesIO()
             response.write(b'Recording is too short')
@@ -146,9 +146,9 @@ class MyHandler(BaseHTTPRequestHandler):
         credentials = pika.PlainCredentials(rabbit_user,rabbit_password)
         connection = pika.BlockingConnection(pika.ConnectionParameters(rabbit_url, credentials=credentials))
         channel = connection.channel()
-        channel.queue_declare(queue="zoomhook")
-        channel.basic_publish(exchange='',
-                              routing_key="zoomhook",
+        channel.queue_declare(queue="zoomhook_video")
+        channel.basic_publish(exchange='cycle',
+                              routing_key="zoomhook_video",
                               body=json.dumps(msg))
         connection.close()
 
