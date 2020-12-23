@@ -9,6 +9,7 @@ from zoomus import ZoomClient
 import configparser
 import sys
 import logging
+import re
 
 HOST_NAME = ''
 PORT_NUMBER = 8080
@@ -27,6 +28,9 @@ class BadWebhookData(Exception):
 
 
 class NoMp4Files(Exception):
+    pass
+
+class NoMatchingPrefix(Exception):
     pass
 
 
@@ -83,6 +87,14 @@ class MyHandler(BaseHTTPRequestHandler):
             s.end_headers()
             response = BytesIO()
             response.write(b'Unrecognized payload format')
+            s.wfile.write(response.getvalue())
+            return
+
+        except NoMatchingPrefix as e:
+            s.send_response(488)
+            s.end_headers()
+            response = BytesIO()
+            response.write(b'Incorrect Prefix')
             s.wfile.write(response.getvalue())
             return
 
@@ -184,6 +196,9 @@ class MyHandler(BaseHTTPRequestHandler):
                             .format(field, payload.keys()))
 
             obj = payload["object"]
+            if not re.search('^[0-9A-Z]+[WS][23][0-9] .*?$',obj["topic"]):
+                logging.error("No matching Prefix")
+                raise NoMatchingPrefix("No matching Prefix")
             for field in required_object_fields:
                 if field not in obj.keys():
                     logging.error("Missing required object field '{}'. Keys found: {}"
