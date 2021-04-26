@@ -15,6 +15,7 @@ HOST_NAME = ''
 PORT_NUMBER = 8080
 
 MIN_DURATION = 0
+expire_time = 0
 
 API_KEY = ""
 API_SECRET = ""
@@ -109,7 +110,24 @@ class MyHandler(BaseHTTPRequestHandler):
 
         token = body["download_token"]
         rabbit_msg , recording_id , meeting_id= s.construct_rabbit_msg(payload,token)
+        logging.info("Checking for duplicate Webhook")
+        with open("uuid_stamp.json", 'r') as f:
+            uuid_list = json.load(f)
+        s.sanitize_json_list(uuid_list)
 
+        for uuid in uuid_list:
+            if uuid["uuid"] == meeting_id:
+                logging.error("Zoom Meeting %s already fired a Webhook, skipping" % meeting_id)
+                s.send_response(566)
+                s.end_headers()
+                response = BytesIO()
+                response.write(b'Duplicate Webhook')
+                s.wfile.write(response.getvalue())
+                return
+        logging.info("No duplicate Webhook found")
+        uuid_list.append({"uuid": meeting_id, "timestamp": time.time()})
+        with open("uuid_stamp.json", "w") as f:
+            json.dump(uuid_list, f)
         s.send_rabbit_msg(rabbit_msg)
         logging.info("Rabbit msg w/ uuid %s has been sent and rec_ids " % meeting_id, *recording_id)
         s.send_response(200)
@@ -165,6 +183,12 @@ class MyHandler(BaseHTTPRequestHandler):
                               routing_key="zoomhook_video",
                               body=json.dumps(msg))
         connection.close()
+
+    def sanitize_json_list(self, list):
+        for entry in list:
+            if time.time() - entry["timestamp"] > expire_time:  # TODO move uuid list to webhook
+                list.remove(entry)
+        return list
 
     def validate_payload(s,payload):
         required_payload_fields = [
@@ -263,6 +287,7 @@ if __name__ == '__main__':
         MIN_DURATION = int(config["Webhook"]["Min_Duration"])
         rabbit_user = config["Rabbit"]["User"]
         rabbit_password = config["Rabbit"]["Password"]
+        expire_time = int(config["Misc"]["expire_time_s"])
         logging.info("Settings are set" )
     except KeyError as err:
         logging.error("Key {0} was not found".format(err))

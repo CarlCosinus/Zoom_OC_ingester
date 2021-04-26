@@ -109,7 +109,7 @@ def rcv_rabbit_callback(dlx_ch, method, properties, body):
     dl_url = ''
     id = ''
     recordings = []
-    logging.info("Processing recordings from Zoom uuid " + data["uuid"])
+    logging.info("Processing recordings from Zoom uuid " + uuid)
     for file in files:
         for key in file.keys():
             if key == "download_url":
@@ -129,10 +129,10 @@ def rcv_rabbit_callback(dlx_ch, method, properties, body):
             logging.error("Could not download file {}".format(e))
             return
     if not oc_upload(data, recordings):
-        logging.error("Zoom UUID %s could not be processed, forwarding to DLX" % data["uuid"])
+        logging.error("Zoom UUID %s could not be processed, forwarding to DLX" % uuid)
         dlx_ch.basic_publish(exchange='', routing_key='dlx', body=body)
         return
-    logging.info("Zoom UUID %s has been successfully processed" % data["uuid"])
+    logging.info("Zoom UUID %s has been successfully processed" % uuid)
 
 
 def oc_upload(data, recordings):
@@ -217,6 +217,7 @@ def oc_upload(data, recordings):
 
 def start_consuming_rabbitmsg():
     global rcv_connection, rcv_queue
+
     logging.info("Start consuming")
     credentials = pika.PlainCredentials(rabbit_user, rabbit_password)
     rcv_connection = pika.BlockingConnection(pika.ConnectionParameters(rabbit_url, credentials=credentials))
