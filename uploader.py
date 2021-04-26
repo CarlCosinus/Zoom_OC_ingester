@@ -109,6 +109,7 @@ def rcv_rabbit_callback(dlx_ch, method, properties, body):
     dl_url = ''
     id = ''
     recordings = []
+    logging.info("Processing recordings from Zoom uuid " + data["uuid"])
     for file in files:
         for key in file.keys():
             if key == "download_url":
@@ -128,8 +129,10 @@ def rcv_rabbit_callback(dlx_ch, method, properties, body):
             logging.error("Could not download file {}".format(e))
             return
     if not oc_upload(data, recordings):
+        logging.error("Zoom UUID %s could not be processed, forwarding to DLX" % data["uuid"])
         dlx_ch.basic_publish(exchange='', routing_key='dlx', body=body)
         return
+    logging.info("Zoom UUID %s has been successfully processed" % data["uuid"])
 
 
 def oc_upload(data, recordings):
@@ -183,8 +186,7 @@ def oc_upload(data, recordings):
         else:
             resp_dict = xmltodict.parse(response.content)
             mp_id = resp_dict['wf:workflow']['mp:mediapackage']['@id']
-            logging.info("Zoom recordings ID : ".join(
-                str(recording) for recording in recordings) + " has been uploaded to OC with MP-ID : " + mp_id)
+            logging.info("Zoom recordings ID : %s has been uploaded to OC with MP-ID : %s" % recordings, mp_id)
             ack = True
     except IOError:
         logging.error(

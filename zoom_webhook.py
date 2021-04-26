@@ -108,10 +108,10 @@ class MyHandler(BaseHTTPRequestHandler):
             return
 
         token = body["download_token"]
-        rabbit_msg , recording_id = s.construct_rabbit_msg(payload,token)
+        rabbit_msg , recording_id , meeting_id= s.construct_rabbit_msg(payload,token)
 
         s.send_rabbit_msg(rabbit_msg)
-        logging.info("Rabbit msg w/ rec ID %s has been sent" % recording_id)
+        logging.info("Rabbit msg w/ uuid %s has been sent and rec_ids " % meeting_id, *recording_id)
         s.send_response(200)
         s.end_headers()
         response = BytesIO()
@@ -126,9 +126,11 @@ class MyHandler(BaseHTTPRequestHandler):
         user_list = json.loads(user_list_response.content.decode("utf-8"))
 
         recording_files = []
+        rec_id= []
+        meeting_id = payload["object"]["uuid"]
         for file in payload["object"]["recording_files"]:
             if file["file_type"].lower() == "mp4":
-                rec_id = file["id"]
+                rec_id.append(file["id"])
                 recording_files.append({
                     "recording_id": file["id"],
                     "recording_start": file["recording_start"],
@@ -139,7 +141,7 @@ class MyHandler(BaseHTTPRequestHandler):
                 })
 
         rabbit_msg = {
-            "uuid": payload["object"]["uuid"],
+            "uuid": meeting_id,
             "zoom_series_id": payload["object"]["id"],
             "topic": payload["object"]["topic"],
             "start_time": payload["object"]["start_time"],
@@ -152,7 +154,7 @@ class MyHandler(BaseHTTPRequestHandler):
         }
         logging.info("Constructed Rabbit Msg")
 
-        return rabbit_msg, rec_id
+        return rabbit_msg, rec_id, meeting_id
 
     def send_rabbit_msg(self,msg):
         credentials = pika.PlainCredentials(rabbit_user,rabbit_password)
